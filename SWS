@@ -1,0 +1,142 @@
+from os import listdir
+import numpy as np
+def distanceNorm(Norm,D_value):	 	
+    if Norm == '1':		
+        counter = np.absolute(D_value)
+        counter = np.sum(counter)	
+    elif Norm == '2':		
+        counter = np.power(D_value,2)		
+        counter = np.sum(counter)	
+        counter = np.sqrt(counter)		
+    return counter   
+
+def img2vector(filename):#The naming rule of the sample is: a_b.txt, a represents the sample category, and b represents the b th under the category
+    np.set_printoptions(suppress = True)
+    txtPath = open(filename)
+    Data = []
+    prob = []
+    Intensity = [line.strip().split('\t') for line in txtPath.readlines()] 
+    IntensityArr = np.array(Intensity , dtype = 'float')
+    prob = IntensityArr[: , 1]
+    prob=prob[56:1867]#Intercept spectrum 600-1800 cm-1 wavenumber band.
+    Data.append(prob)
+    dataArr = np.array(Data)
+    return dataArr
+
+def fit(features,labels,iter_ratio,k,norm):	
+    (n_samples,n_features) = np.shape(features)
+    distance = np.zeros((n_samples,n_samples))
+    weight = np.zeros(n_features)
+    labels = list(map(int,labels))
+    for index_i in range(n_samples):		
+        for index_j in range(index_i+1,n_samples):			
+            D_value = features[index_i] - features[index_j]			
+            distance[index_i,index_j] = distanceNorm(norm,D_value)
+    distance += distance.T	 	   
+    for index_i in range(int(iter_ratio*n_samples)):
+        self_features = features[index_i]
+        nearHit = list()
+        nearMiss = dict()
+        n_labels = list(set(labels))
+        termination = np.zeros(len(n_labels))		
+        del n_labels[n_labels.index(labels[index_i])]
+        for label in n_labels:			
+            nearMiss[label] = list()
+        distance_sort = list()	
+        distance[index_i,index_i] = np.max(distance[index_i])
+        for index in range(n_samples):			
+            distance_sort.append([distance[index_i,index],index,labels[index]])
+        distance_sort.sort(key = lambda x:x[0])
+        for index in range(n_samples):
+            if distance_sort[index][2] == labels[index_i]:
+                if len(nearHit) < k:					
+                    nearHit.append(features[distance_sort[index][1]])				               
+                else:					
+                    termination[distance_sort[index][2]] = 1            
+            elif distance_sort[index][2] != labels[index_i]:             								
+                nearMiss[distance_sort[index][2]].append(features[distance_sort[index][1]])		   
+            if list(map(int,list(termination))).count(0) == 0:
+                break		       
+        nearMiss_term = np.zeros((len(list(set(labels))),n_features));	
+        pr = labels.count(labels[index_i]) / len(labels)
+        for index,label in enumerate(nearMiss.keys()):			
+            for x in nearMiss[label][0:k]:         
+                pc = labels.count(label) / len(labels)	   
+                nearMiss_term[index] += np.abs(np.power((self_features - x),2)); 
+            weight += pc*nearMiss_term[index]/((1-pr)*k);
+    return weight/(iter_ratio*n_samples);
+
+def classification():
+    labels = []
+    trainingFileList =  listdir('data/traindata')
+    m = len(trainingFileList)
+    features = np.zeros((m,1811))  
+    for i in range(m):
+        fileNameStr = trainingFileList[i]  
+        fileStr = fileNameStr.split('.')[0]  
+        classNumStr = int(fileStr.split('_')[0])
+        labels.append(classNumStr)
+        features[i,:] = img2vector('data//traindata//%s' % fileNameStr)
+    w=[]
+    for x in range(0,1):	
+        weight = fit(features=features, labels=labels, iter_ratio=1, k=1, norm='2');
+        w.append(weight)
+    w=np.array(w)
+    weight = np.mean(w,axis=0)
+    return weight
+
+def clustering():
+    labels = []
+    trainingFileList =  listdir('data/traindata')
+    m = len(trainingFileList)
+    features = np.zeros((m,1811))  
+    for i in range(m):
+        fileNameStr = trainingFileList[i]
+        fileStr = fileNameStr.split('.')[0]  #The naming rule of the sample is: a_b.txt, a represents the sample category, and b represents the b th under the category
+        classNumStr = int(fileStr.split('_')[0])
+        labels.append(classNumStr)
+        features[i,:] = img2vector('data//traindata//%s' % fileNameStr)   
+    weight = np.std(features,axis=0)
+    return weight
+
+def filterweight(a,f,m):#f is sampling frequency，m is iteration.
+    b = {}
+    for i in range(0,len(a),f):
+        key = i
+        value = a[i]
+        b[key] = value
+    tmp = []
+    for i in b.values():
+        tmp.append(i)
+    val = sum(list(map(float, b.values())))/len(b)
+    l = len(a) - 2
+    b = dict(filter(lambda x:int(x[0]) < l,dict(filter(lambda x: x[1] > val,b.items())).items()))
+    y = dict(filter(lambda x:int(x[0]) < l,dict(filter(lambda x: x[1] > val,b.items())).items()))
+    while m:
+        for i in y.keys():
+            b[i-1] = a[i-1]; b[i-2] = a[i-2]
+            b[i+1] = a[i+1]; b[i+2] = a[i+2]
+            tmp = []
+        for i in b.values():tmp.append(i)
+        val1 = sum(list(map(float, b.values())))/len(b)
+        b = dict(filter(lambda x: 0 < int(x[0]) < l,dict(filter(lambda x: x[1] > val1,b.items())).items())) 
+        y = dict(filter(lambda x: 0 < int(x[0]) < l,dict(filter(lambda x: x[1] > val1,b.items())).items()))     
+        m = m-1
+    res = []
+    for i in range(len(a)):
+        if i in b.keys():
+            res.append(b[i])
+        else:
+            res.append(0)
+    return res
+
+def weight():	
+    f = 2
+    m = 2
+    a = clustering()#if used for classification, this code should write as: a = classification()
+    a1=a[0:468];     weight1 = filterweight(a1,f,m)
+    a2=a[468:588];   weight2 = filterweight(a2,f,m)
+    a3=a[588:1220];  weight3 = filterweight(a3,f,m)
+    a4=a[1220:1530]; weight4 = filterweight(a4,f,m)
+    a5=a[1530:1811]; weight5 = filterweight(a5,f,m)
+    return weight1+weight2+weight3+weight4+weight5 
